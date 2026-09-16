@@ -1,8 +1,13 @@
 import io
 
+
 import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
+from services.n8n_client import (
+    get_new_submissions,
+    download_submission_file,
+)
 
 from services.document_parser import extract_text
 from services.reviewer import compare_documents
