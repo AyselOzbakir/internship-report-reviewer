@@ -8,8 +8,6 @@ from streamlit_drawable_canvas import st_canvas
 from services.n8n_client import (
     get_new_submissions,
     download_submission_file,
-    update_submission_status,
-    send_approved_submission,
 )
 
 from services.document_parser import extract_text
@@ -1015,15 +1013,6 @@ if review is not None:
             st.session_state.decision = "CORRECTION"
             st.session_state.signed_pdf_path = None
 
-            if st.session_state.email_submission_id:
-                try:
-                    update_submission_status(
-                        st.session_state.email_submission_id,
-                        "correction_requested",
-                    )
-                except Exception as error:
-                    st.error(f"Could not update submission status: {error}")
-
         if approve:
             if signature_file is None:
                 st.error("Draw or upload the coordinator signature first.")
@@ -1044,29 +1033,6 @@ if review is not None:
 
                     st.session_state.decision = "APPROVED"
                     st.session_state.signed_pdf_path = signed_path
-
-                    if st.session_state.email_submission_id:
-                        try:
-                            update_submission_status(
-                                st.session_state.email_submission_id,
-                                "approved",
-                            )
-                        except Exception as error:
-                            st.error(
-                                f"Signed successfully, but status update failed: {error}"
-                            )
-
-                    if st.session_state.email_submission_id:
-                        try:
-                            send_approved_submission(
-                                st.session_state.email_submission_id,
-                                signed_path,
-                            )
-                        except Exception as error:
-                            st.error(
-                                f"Report was signed, but the approval email could not be sent: {error}"
-                            )
-
                 except Exception as error:
                     st.error(f"Signing failed: {error}")
 
