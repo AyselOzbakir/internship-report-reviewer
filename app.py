@@ -350,6 +350,58 @@ st.markdown(
         font-size: 12px;
     }
 
+    .source-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin: 4px 0 10px 0;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(217,138,55,0.08);
+        border: 1px solid rgba(217,138,55,0.18);
+        color: #d9b17d;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-weight: 700;
+    }
+
+    .submission-card {
+        margin-top: 12px;
+        margin-bottom: 12px;
+        padding: 16px 18px;
+        border-radius: 14px;
+        background: linear-gradient(145deg, rgba(40,30,24,0.96), rgba(24,18,15,0.96));
+        border: 1px solid rgba(239,179,95,0.18);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+    }
+
+    .submission-card-title {
+        color: var(--cream);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+    }
+
+    .submission-card-list {
+        display: grid;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.55;
+    }
+
+    .submission-card-label {
+        color: #d7b07a;
+        font-weight: 600;
+    }
+
+    .submission-card .clear-email-btn {
+        margin-top: 12px;
+    }
+
     .finding {
         display: flex;
         align-items: flex-start;
@@ -773,6 +825,15 @@ st.write("")
 
 st.caption("Or load the latest complete document pair received by email.")
 
+manual_upload_active = (
+    learning_report is not None or internship_journal is not None
+)
+
+if manual_upload_active:
+    st.html('<div class="source-badge">Source: Manual upload</div>')
+elif st.session_state.email_submission_loaded:
+    st.html('<div class="source-badge">Source: Email</div>')
+
 load_email_submission = st.button(
     "Load latest email submission",
     key="load_latest_email_submission",
@@ -801,11 +862,31 @@ if (
     and st.session_state.email_learning_file is not None
     and st.session_state.email_journal_file is not None
 ):
-    st.info(
-        "Email submission loaded\n\n"
-        f"- {st.session_state.email_learning_file.name}\n"
-        f"- {st.session_state.email_journal_file.name}"
+    st.html(
+        """
+        <div class="submission-card">
+            <div class="submission-card-title">Email submission loaded</div>
+            <div class="submission-card-list">
+                <div><span class="submission-card-label">Learning outcomes:</span> {}</div>
+                <div><span class="submission-card-label">Internship journal:</span> {}</div>
+            </div>
+        </div>
+        """.format(
+            st.session_state.email_learning_file.name,
+            st.session_state.email_journal_file.name,
+        )
     )
+
+    clear_email_submission = st.button(
+        "Clear email submission",
+        key="clear_email_submission",
+    )
+
+    if clear_email_submission:
+        st.session_state.email_learning_file = None
+        st.session_state.email_journal_file = None
+        st.session_state.email_submission_id = None
+        st.session_state.email_submission_loaded = False
 
 effective_learning_file = (
     learning_report
