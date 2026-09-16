@@ -1,4 +1,5 @@
 import io
+from datetime import datetime, timezone
 
 
 import streamlit as st
@@ -36,6 +37,10 @@ DEFAULT_STATE = {
     "journal_text": "",
     "decision": None,
     "signed_pdf_path": None,
+    "email_learning_file": None,
+    "email_journal_file": None,
+    "email_submission_id": None,
+    "email_submission_loaded": False,
 }
 
 for key, value in DEFAULT_STATE.items():
@@ -489,6 +494,101 @@ def render_finding(check: dict) -> None:
     )
 
 
+def reset_file_pointer(file_obj):
+    if hasattr(file_obj, "seek"):
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+
+
+def parse_created_at(value):
+    fallback = datetime.min.replace(tzinfo=timezone.utc)
+
+    if not value:
+        return fallback
+
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except (TypeError, ValueError):
+        return fallback
+
+
+def fetch_latest_email_submission():
+    rows = get_new_submissions() or []
+    grouped = {}
+
+    for row in rows:
+        message_id = row.get("messageId")
+        document_type = row.get("documentType")
+
+        if not message_id:
+            continue
+
+        if document_type not in {"internship_journal", "learning_outcomes"}:
+            continue
+
+        created_at = parse_created_at(row.get("createdAt"))
+
+        group = grouped.setdefault(
+            message_id,
+            {
+                "message_id": message_id,
+                "created_at": created_at,
+                "documents": {},
+            },
+        )
+
+        if created_at > group["created_at"]:
+            group["created_at"] = created_at
+
+        existing_row = group["documents"].get(document_type)
+        if (
+            existing_row is None
+            or created_at >= parse_created_at(existing_row.get("createdAt"))
+        ):
+            group["documents"][document_type] = row
+
+    complete_groups = [
+        group
+        for group in grouped.values()
+        if "internship_journal" in group["documents"]
+        and "learning_outcomes" in group["documents"]
+    ]
+
+    if not complete_groups:
+        return None
+
+    latest_group = max(
+        complete_groups,
+        key=lambda item: (item["created_at"], item["message_id"]),
+    )
+
+    learning_row = latest_group["documents"]["learning_outcomes"]
+    journal_row = latest_group["documents"]["internship_journal"]
+
+    learning_file = download_submission_file(
+        learning_row["driveFileId"],
+        learning_row["fileName"],
+    )
+    journal_file = download_submission_file(
+        journal_row["driveFileId"],
+        journal_row["fileName"],
+    )
+
+    reset_file_pointer(learning_file)
+    reset_file_pointer(journal_file)
+
+    return {
+        "message_id": latest_group["message_id"],
+        "learning_file": learning_file,
+        "journal_file": journal_file,
+    }
+
+
 def canvas_to_signature(canvas_result):
     if canvas_result.image_data is None:
         return None
@@ -669,6 +769,54 @@ with upload_right:
 
 st.write("")
 
+st.caption("Or load the latest complete document pair received by email.")
+
+load_email_submission = st.button(
+    "Load latest email submission",
+    key="load_latest_email_submission",
+)
+
+if load_email_submission:
+    try:
+        submission = fetch_latest_email_submission()
+
+        if submission is None:
+            st.session_state.email_learning_file = None
+            st.session_state.email_journal_file = None
+            st.session_state.email_submission_id = None
+            st.session_state.email_submission_loaded = False
+            st.warning("No complete email submission is available right now.")
+        else:
+            st.session_state.email_learning_file = submission["learning_file"]
+            st.session_state.email_journal_file = submission["journal_file"]
+            st.session_state.email_submission_id = submission["message_id"]
+            st.session_state.email_submission_loaded = True
+    except Exception as error:
+        st.error(f"Unable to load email submission: {error}")
+
+if (
+    st.session_state.email_submission_loaded
+    and st.session_state.email_learning_file is not None
+    and st.session_state.email_journal_file is not None
+):
+    st.info(
+        "Email submission loaded\n\n"
+        f"- {st.session_state.email_learning_file.name}\n"
+        f"- {st.session_state.email_journal_file.name}"
+    )
+
+effective_learning_file = (
+    learning_report
+    if learning_report is not None
+    else st.session_state.email_learning_file
+)
+
+effective_journal_file = (
+    internship_journal
+    if internship_journal is not None
+    else st.session_state.email_journal_file
+)
+
 analyze = st.button(
     "Run document review",
     type="primary",
@@ -684,15 +832,18 @@ if analyze:
     st.session_state.signed_pdf_path = None
     st.session_state.decision = None
 
-    if learning_report is None or internship_journal is None:
+    if effective_learning_file is None or effective_journal_file is None:
         st.warning(
             "Upload both the Learning Outcomes Report and the Student Internship Journal first."
         )
     else:
         try:
+            reset_file_pointer(effective_learning_file)
+            reset_file_pointer(effective_journal_file)
+
             with st.spinner("Reading and comparing the internship documents..."):
-                learning_text = extract_text(learning_report)
-                journal_text = extract_text(internship_journal)
+                learning_text = extract_text(effective_learning_file)
+                journal_text = extract_text(effective_journal_file)
 
             if not learning_text.strip():
                 st.error("No readable text was found in the Learning Outcomes Report.")
@@ -865,14 +1016,20 @@ if review is not None:
         if approve:
             if signature_file is None:
                 st.error("Draw or upload the coordinator signature first.")
-            elif learning_report is None:
+            elif effective_learning_file is None:
                 st.error("Learning Outcomes Report is missing.")
-            elif not learning_report.name.lower().endswith(".pdf"):
+            elif not getattr(effective_learning_file, "name", "").lower().endswith(".pdf"):
                 st.error("Signing currently requires the Learning Outcomes Report in PDF format.")
             else:
                 try:
+                    reset_file_pointer(effective_learning_file)
+                    reset_file_pointer(signature_file)
+
                     with st.spinner("Signing the approved report..."):
-                        signed_path = sign_uploaded_pdf(learning_report, signature_file)
+                        signed_path = sign_uploaded_pdf(
+                            effective_learning_file,
+                            signature_file,
+                        )
 
                     st.session_state.decision = "APPROVED"
                     st.session_state.signed_pdf_path = signed_path

@@ -7,3 +7,4 @@ pillow
 streamlit-drawable-canvas
 openai
 pydantic
+requests
